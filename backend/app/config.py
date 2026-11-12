@@ -8,7 +8,7 @@ class Settings(BaseSettings):
 
     llm_api_key: str = ""
     llm_base_url: str = "https://api.groq.com/openai/v1"
-    llm_model: str = "llama-3.3-70b-versatile"                    
+    llm_model: str = "openai/gpt-oss-120b"                    
     llm_temperature: float = 0.1                 
     max_answer_tokens: int = 1200
     llm_retries: int = 3
