@@ -6,17 +6,29 @@ import pytesseract
 import cv2
 from PIL import Image
 from app.config import settings
-from ingestion.ocr_ops import (
-    citaj_kes,
-    clean_ocr_text,
-    page_fingerprint,
-    zapisi_kes,
-    zabelezi_neuspeh,
-)
+from ingestion.ocr_ops import (citaj_kes,clean_ocr_text,page_fingerprint,zapisi_kes,zabelezi_neuspeh,)
 
 logger = logging.getLogger(__name__)
-
 __all__ = ["ocr_slika", "ocr_page", "ocr_bytes", "zabelezi_neuspeh"]
+
+def _tess_config(psm: int | None = None) -> str:
+    psm = settings.ocr_psm if psm is None else psm # ako ne e dadeno psm, se zema od config
+    return f"--oem {int(settings.ocr_oem)} --psm {int(psm)}" # se pravi string sto odi vo Tesseract
+
+def _kes_kluc (png: bytes, dpi: int, psm: int) -> str:
+    extra = f"{settings.ocr_lang}|oem{settings.ocr_oem}|psm{psm}|thr{int(settings.ocr_adaptive_threshold)}" # ne odi samo slikata vo kesot ode i konfiguracijata (jazik, oem, psm...)
+    return page_fingerprint(png + extra.encode(), dpi, settings.ocr_lang)  #slikata i configuracijata se mesaat vo eden otpecatok
+
+def _zgolemi_ako_malo(arr: np.ndarray) -> np.ndarray:
+    min_side = int(settings.ocr_upscale_min_side or 0) # od config se zema do koja golemina treba da stigne pomalata strana na slikata
+    if min_side <= 0: #dokolki e 0, zgolemuvanje e iskluceno, slikata se prenesuva na obrabotka kako sto e skenirana stavena vo sistemot za obrabotka
+        return arr
+    h,w = arr.shape[:2] #se zemaat dimenzzite na listoto, slikata so e vmetnata za obrabotka kade h visina i w sirina
+    m = min(h,w) #m e golemata strana, spred nea odlucuvame dali e premala i treba zgolemuvanje ili ne
+    if m>= min_side: #ako vejke e dovolno golema, ne se zgolemuva 
+        return arr 
+    skala = min_side / float(m) #kolku pati treba da se rastegne za da stigne do min_side
+    return cv2.resize(arr, None, fx=skala, fy=skala, interpolation=cv2.INTER_CUBIC) #se vraka pogolema slika
 
 #proverka dali stranicata e izvrtena se proveruva za 90 180 270 stepeni, go detektira agolot i ja vraka vo normalna polozba
 def _auto_rotate(img):
@@ -50,16 +62,23 @@ def _ispravi_agol(arr):
 
 #podgotovka na slikata, dva cekori vo try blok za da ne si poprecuvaat eden na drug pri greska
 def _preprocess(img):
-    try:
-        arr = np.array(img.convert("L")) #L ni gi pretstavuva sivite tonovi
-        arr = cv2.fastNlMeansDenoising(arr, None, 10, 7, 21)
+    try: 
+        arr = np.array(img.convert("L")) #L se sivite tonovi
+        arr = cv2.fastNlMeansDenoising(arr, None, 10, 7, 21) #go trga sitniot sum od slikata ili skento, bez da go brise tekstot
     except Exception as greska:
-        logger.debug("Preprocess preskoknat: %s", greska)
         return img
     try:
-        arr = _ispravi_agol(arr)
+        arr = _ispravi_agol(arr) # ispravi mal agol ako e skenot kriv
     except Exception as greska:
         logger.debug("Ispravuvanjeto na agolot e preskoknato: %s", greska)
+    try:
+        arr = _zgolemi_ako_malo(arr) #ako slikata e premala. prvo ja zgolemuva
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        arr = clahe.apply(arr)
+        if settings.ocr_adaptive_threshold:
+            arr = cv2.adaptiveThreshold(arr, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11)
+    except Exception as greska:
+        logger.debug (greska)
     return Image.fromarray(arr)
 
 # gi podreduva 4te teminja na listot 
@@ -130,10 +149,15 @@ def _listovi(img):
             izvleceni.append(list_img)
     return izvleceni or [img]
 
-#go cita tekstot so Tesseract i vraka tekst, prosecna doverba
-#zborovite gi grupira po linii za da se zacuva redoslednot 
-def _procitaj(img) -> tuple[str, float]:
-    data = pytesseract.image_to_data(img,lang=settings.ocr_lang,output_type=pytesseract.Output.DICT,)
+#go cita tekstot so Tesseract; psm = nacin na citanje (blok/koloni)
+def _procitaj(img, psm: int | None = None) -> tuple[str, float]:
+    # image_to_data dava zbor + doverba; config odi od _tess_config
+    data = pytesseract.image_to_data(
+        img,
+        lang=settings.ocr_lang,
+        config=_tess_config(psm),
+        output_type=pytesseract.Output.DICT,
+    )
     #kluc (blok, paragrafi i linii) - lista od zborovi, doverba
     linii: dict[tuple, list[tuple[str, float]]] = {}
     for i, zbor in enumerate(data["text"]):
@@ -156,60 +180,118 @@ def _procitaj(img) -> tuple[str, float]:
     doverba = sum(oceni) / len(oceni) if oceni else 0.0
     return tekst, doverba
 
-#glavna funkcija, za tekot na obrabotka na nekoja slika
-#rotacija - delenje na listovi - predorabotka - citanje 
-def ocr_slika(img) -> tuple[str, float]:
+
+# eden list: prvo preprocess, pa citanje so daden psm
+def _ocr_eden_list(eden, psm: int | None = None) -> tuple[str, float]:
+    if settings.ocr_preprocess:
+        eden = _preprocess(eden)
+    return _procitaj(eden, psm=psm)
+
+
+#glavna funkcija: rotacija → listovi → preprocess/citanje (+ retry so drug psm)
+def ocr_slika(img, psm: int | None = None) -> tuple[str, float]:
     if settings.ocr_auto_rotate:
         img = _auto_rotate(img)
     listovi = _listovi(img) if settings.ocr_split_pages else [img]
     delovi = []
     doverbi = []
     for eden in listovi:
-        if settings.ocr_preprocess:
-            eden = _preprocess(eden)
-        tekst, doverba = _procitaj(eden)
+        tekst, doverba = _ocr_eden_list(eden, psm=psm)
+        # vtor obid: drug psm ako e slaba doverba ili prazen tekst
+        if settings.ocr_retry_on_low_confidence and (
+            not tekst.strip() or doverba < settings.ocr_min_confidence
+        ):
+            alt_psm = int(settings.ocr_psm_retry)
+            primaren = int(psm if psm is not None else settings.ocr_psm)
+            if alt_psm != primaren:
+                t2, d2 = _ocr_eden_list(eden, psm=alt_psm)
+                if (d2 > doverba) or (not tekst.strip() and t2.strip()):
+                    tekst, doverba = t2, d2
         if tekst.strip():   #listovi bez tekst ne vleguvaat ni vo rezultatot ni vo doverbata 
             delovi.append(tekst)
             doverbi.append(doverba)
     if not delovi:
         return "", 0.0
-    # listovite se odvoeni so prazen red; cistenje na sum od pecat; doverbata e prosek
     surov = "\n\n".join(delovi)
     tekst = clean_ocr_text(surov)
     doverba = sum(doverbi) / len(doverbi)
     return tekst, doverba
 
-#OCR na stranicata od PDF: ja renderira vo slikata i ja cita, ne frla greska i pri neuspeh vraka prazen tekst 
+
+def _dpi_za_strana(page) -> int:
+    # mal PDF rect → pogolem DPI za posharp render
+    dpi = int(settings.ocr_dpi)
+    try:
+        w, h = float(page.rect.width), float(page.rect.height)
+        if min(w, h) < 500:
+            dpi = max(dpi, int(settings.ocr_dpi_retry))
+    except Exception:
+        pass
+    return dpi
+
+
+#OCR na stranicata od PDF: render → kes → citanje (+ DPI retry)
 def ocr_page(page) -> tuple[str, float]:
     try:
-        pix = page.get_pixmap(dpi=settings.ocr_dpi)
+        dpi = _dpi_za_strana(page)
+        psm = int(settings.ocr_psm)
+        pix = page.get_pixmap(dpi=dpi)
         png = pix.tobytes("png")
-        otpecatok = page_fingerprint(png, settings.ocr_dpi, settings.ocr_lang)
+        otpecatok = _kes_kluc(png, dpi, psm)
         kes = citaj_kes(otpecatok)
         if kes is not None:
             logger.debug("OCR кеш погодок %s…", otpecatok[:12])
             return kes
         img = Image.open(io.BytesIO(png))
-        tekst, doverba = ocr_slika(img)
+        tekst, doverba = ocr_slika(img, psm=psm)
+        # vtor render so pogolem DPI ako uste e slabo
+        if (
+            settings.ocr_retry_on_low_confidence
+            and dpi < int(settings.ocr_dpi_retry)
+            and (not tekst.strip() or doverba < settings.ocr_min_confidence)
+        ):
+            dpi2 = int(settings.ocr_dpi_retry)
+            pix2 = page.get_pixmap(dpi=dpi2)
+            png2 = pix2.tobytes("png")
+            ot2 = _kes_kluc(png2, dpi2, psm)
+            kes2 = citaj_kes(ot2)
+            if kes2 is not None:
+                tekst2, doverba2 = kes2
+            else:
+                img2 = Image.open(io.BytesIO(png2))
+                tekst2, doverba2 = ocr_slika(img2, psm=psm)
+                if tekst2.strip():
+                    zapisi_kes(ot2, tekst2, doverba2, {"dpi": dpi2, "psm": psm})
+            if (doverba2 > doverba) or (not tekst.strip() and tekst2.strip()):
+                tekst, doverba = tekst2, doverba2
+                otpecatok = ot2
+                dpi = dpi2
         if tekst.strip():
-            zapisi_kes(otpecatok, tekst, doverba, {"dpi": settings.ocr_dpi})
+            zapisi_kes(otpecatok, tekst, doverba, {"dpi": dpi, "psm": psm})
         return tekst, doverba
     except Exception as greska:
         logger.warning("OCR propadna, ne e izvlecen tekst (%s)", greska)
         return "", 0.0
 
+
 #OCR na slikata dobiena kako bajti
 def ocr_bytes(podatoci: bytes) -> tuple[str, float]:
     try:
-        otpecatok = page_fingerprint(podatoci, settings.ocr_dpi, settings.ocr_lang)
+        psm = int(settings.ocr_psm)
+        otpecatok = _kes_kluc(podatoci, settings.ocr_dpi, psm)
         kes = citaj_kes(otpecatok)
         if kes is not None:
             return kes
         img = Image.open(io.BytesIO(podatoci))
         img.load()  #ja cita slikata vednas, za greskata da se fati tuka
-        tekst, doverba = ocr_slika(img.convert("RGB"))
+        tekst, doverba = ocr_slika(img.convert("RGB"), psm=psm)
         if tekst.strip():
-            zapisi_kes(otpecatok, tekst, doverba, {"source": "bytes"})
+            zapisi_kes(
+                otpecatok,
+                tekst,
+                doverba,
+                {"source": "bytes", "psm": psm, "dpi": settings.ocr_dpi},
+            )
         return tekst, doverba
     except Exception as greska:
         logger.warning("OCR propadna, ne e izvlecen tekst (%s)", greska)
