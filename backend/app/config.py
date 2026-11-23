@@ -8,7 +8,7 @@ class Settings(BaseSettings):
 
     llm_api_key: str = ""
     llm_base_url: str = "https://api.groq.com/openai/v1"
-    llm_model: str = "llama-3.3-70b-versatile"                    
+    llm_model: str = "openai/gpt-oss-120b"                    
     llm_temperature: float = 0.1                 
     max_answer_tokens: int = 1200
     llm_retries: int = 3
@@ -65,14 +65,21 @@ class Settings(BaseSettings):
     use_ocr: bool = True
     ocr_lang: str = "mkd+eng" #dokumentacijata e na makedonski 
     ocr_dpi: int = 300 #rezulucija pri renderiranje
+    ocr_dpi_retry: int = 400 #vtor obid so pogolema rezolucija ako e niska doverba
+    ocr_adaptive_threshold: bool = True #podobro citanje na siv, skrien list tekst
+    ocr_upscale_min_side: int = 1400   # ako e slikata premala, ja zgolemuva pred OCR
+    ocr_psm: int = 6   #nacin na citanje, kade 6 e eden blok tekst 
+    ocr_psm_retry: int = 4 #alternativen nacin, kako koloni pri slab prv obid
+    ocr_oem: int = 3 #motor na Tesseract 
+    ocr_retry_on_low_confidence: bool = True   #ako e los rezultatot, se probuva pak so drugi podnesuvanje
     ocr_min_chars: int = 20 # pod ovoj prag stranicite se zemaat kako skenirani           
-    ocr_auto_rotate: bool = True # avtomatsko ispravuvanje na slikata
-    ocr_preprocess: bool = True 
-    ocr_min_confidence: float = 60.0
+    ocr_auto_rotate: bool = True #avtomatsko ispravuvanje na slikata
+    ocr_preprocess: bool = True  #cistenje pred citanje
+    ocr_min_confidence: float = 60.0  #pod ovaa doverba stranicata e problematicna
     ocr_failed_log: str = "data/ocr/ocr_failed.txt"
-    ocr_split_pages: bool = True
-    ocr_cache_dir: str = "data/ocr/cache"
-    ocr_review_dir: str = "data/ocr/za_pregled"
+    ocr_split_pages: bool = True    # ako ima dva lista na edna slika gi deli
+    ocr_cache_dir: str = "data/ocr/cache"   #kesiran OCR tekst
+    ocr_review_dir: str = "data/ocr/za_pregled" #dokumenti koj ne se dobro procitani i mora da se racno pregledat
     ocr_image_min_coverage: float = 0.25  # mešana strana: dig. tekst + golema slika
     ocr_quarantine_pii: bool = True  # odluki so iminja → za_pregled, ne vo Qdrant
 
