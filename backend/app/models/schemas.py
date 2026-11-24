@@ -1,5 +1,5 @@
 # Pydantic modeli za HTTP teloto — FastAPI avtomatski validira i dava 422 pri greska.
-# question max 2000: API-to; sanitize_question potoa krati na max_question_chars (1000).
+# question max = max_question_chars (1000) — ist limit vo widget i API.
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 class ChatRequest(BaseModel):
     """Vlez od vidzetot / curl: tekst + opciski session_id od sessionStorage."""
-    question: str = Field(..., min_length=1, max_length=2000)
+    question: str = Field(..., min_length=1, max_length=1000)
     # Patternot se sovpagja so SESSION_ID_RE — falsifikat so spezijalen znak se otfrla tuka.
     session_id: str | None = Field(
         default=None,
