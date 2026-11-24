@@ -162,7 +162,7 @@
       </div>
       <form class="ugd-ai-footer-form" id="ugd-ai-form">
         <div class="ugd-ai-input-wrap">
-          <input id="ugd-ai-input" type="text" autocomplete="off" maxlength="2000" placeholder="\u041D\u0430\u043F\u0438\u0448\u0435\u0442\u0435 \u043F\u0440\u0430\u0448\u0430\u045A\u0435..."/>
+          <input id="ugd-ai-input" type="text" autocomplete="off" maxlength="1000" placeholder="\u041D\u0430\u043F\u0438\u0448\u0435\u0442\u0435 \u043F\u0440\u0430\u0448\u0430\u045A\u0435..."/>
           <button type="submit" class="ugd-ai-send" aria-label="\u0418\u0441\u043F\u0440\u0430\u0442\u0438">
             <svg class="ugd-ai-send-svg" viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" fill="none"><path d="M22 2 11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2 15 22 11 13 2 9 22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
