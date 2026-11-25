@@ -42,5 +42,5 @@ only then lets the model compose an answer based solely on them, with the source
 | Vector database | Qdrant |
 | Cache / sessions | Redis (required for 2+ API workers) |
 | Embeddings / rerank | multilingual-e5-large, BM25, jina-reranker-v2 |
-| LLM | Google Gemini and Claude API|
+| LLM | Groq API (`openai/gpt-oss-120b`) |
 | Frontend | TypeScript web widget |
